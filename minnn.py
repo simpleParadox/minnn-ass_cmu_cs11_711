@@ -47,11 +47,17 @@ class Tensor:
 
     # accumulate grad
     def accumulate_grad(self, g: xp.ndarray) -> None:
-        raise NotImplementedError
+        self.grad += g
 
     # accumulate grad sparsely; note: only for D2 lookup matrix!
     def accumulate_grad_sparse(self, gs: List[Tuple[int, xp.ndarray]]) -> None:
-        raise NotImplementedError
+        if isinstance(self.grad, dict):
+            for idx, g in gs:
+                if self.grad is None:
+                    self.grad = {}
+                if idx not in self.grad:
+                    self.grad[idx] = xp.zeros_like(g)
+                self.grad[idx] += g
 
     # get dense grad
     def get_dense_grad(self):
