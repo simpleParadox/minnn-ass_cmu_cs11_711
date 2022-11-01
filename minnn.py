@@ -47,17 +47,18 @@ class Tensor:
 
     # accumulate grad
     def accumulate_grad(self, g: xp.ndarray) -> None:
+        if self.grad is None:
+            self.grad = xp.zeros_like(self.data)
         self.grad += g
 
     # accumulate grad sparsely; note: only for D2 lookup matrix!
     def accumulate_grad_sparse(self, gs: List[Tuple[int, xp.ndarray]]) -> None:
-        if isinstance(self.grad, dict):
-            for idx, g in gs:
-                if self.grad is None:
-                    self.grad = {}
-                if idx not in self.grad:
-                    self.grad[idx] = xp.zeros_like(g)
-                self.grad[idx] += g
+        for idx, g in gs:
+            if self.grad is None:
+                self.grad = {}
+            if idx not in self.grad:
+                self.grad[idx] = xp.zeros_like(g)
+            self.grad[idx] += g
 
     # get dense grad
     def get_dense_grad(self):
@@ -169,7 +170,9 @@ class Initializer:
 
     @staticmethod
     def xavier_uniform(shape: Sequence[int], gain=1.0):
-        raise NotImplementedError
+        m, h = shape
+        weights = xp.random.uniform(-1*(xp.sqrt(6)/(xp.sqrt(m+h))), xp.sqrt(6)/(xp.sqrt(m+h)), size=shape)
+        return weights
 
 # Model: collection of parameters
 class Model:
@@ -236,6 +239,29 @@ class SGDTrainer(Trainer):
 
 class MomentumTrainer(Trainer):
     def __init__(self, model: Model, lrate=0.1, mrate=0.99):
+        super().__init__(model)
+        self.lrate = lrate
+        self.mrate = mrate
+        self.m = 0.0
+
+    def update(self):
+        lrate = self.lrate
+        mrate = self.mrate
+        for p in self.model.params:
+            if p.grad is not None:
+                print("p.grad is dict", p)
+                self.m = mrate * self.m + (1 - mrate) * p.grad
+                if isinstance(p.grad, dict):
+
+                    self.update_sparse(p, self.m, lrate)
+                else:
+                    self.update_dense(p, self.m, lrate)
+                    print("hello")
+            p.grad = None
+
+    def update_dense(self, p: Parameter, g: xp.ndarray, lrate: float):
+        p.data -= lrate * g
+    def update_sparse(self, p: Parameter, gs: Dict[int, xp.ndarray], lrate: float):
         raise NotImplementedError
 
 # --
@@ -274,9 +300,16 @@ class OpLookup(Op):
     def __init__(self):
         raise NotImplementedError
 
+    def forward(self, w_emb: Tensor, w_idxs: list):
+        w_emb.data = w_emb.data[w_idxs]
+        return self.w_emb
+    def backward(self):
+        raise NotImplementedError
+
 class OpSum(Op):
     def __init__(self):
         super().__init__()
+
 
     # [..., K, ...] -> [..., ...]
     def forward(self, emb: Tensor, axis: int):
@@ -296,6 +329,11 @@ class OpSum(Op):
 
 class OpMax(Op):
     def __init__(self):
+        raise NotImplementedError
+    def forward(self, tensor: Tensor, axis: int):
+        raise NotImplementedError
+
+    def backward(self):
         raise NotImplementedError
 
 class OpAvg(Op):
